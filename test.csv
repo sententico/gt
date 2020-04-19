@@ -1,0 +1,10 @@
+## animal file
+##
+animal,count,value
+
+dog,10,100
+cat,8,0
+
+## weird animals section
+##
+wombat,5,20

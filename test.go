@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"math"
+	//"math"
 )
 
 func series(n float64, m float64, r chan float64) {
@@ -21,12 +21,17 @@ func fib(n int) int {
 }
 
 func main() {
-	n, m, r, s := 10000000000000.0, 8.0, make(chan float64), 0.0
-	for i := 0.0; i < m; i++ {
-		go series(n-i, m, r)
+	for ln := range GetCSV("test.csv", nil, "", "#") {
+		fmt.Println(ln)
 	}
-	for i := 0.0; i < m; i++ {
-		s += <-r
-	}
-	fmt.Println(s - math.Log(n))
+	//fmt.Println(peekText("test.csv", 4, "#"))
+
+	// n, m, r, s := 1e10, 8.0, make(chan float64), 0.0
+	// for i := 0.0; i < m; i++ {
+	// 	go series(n-i, m, r)
+	// }
+	// for i := 0.0; i < m; i++ {
+	// 	s += <-r
+	// }
+	// fmt.Println(s - math.Log(n))
 }
