@@ -45,20 +45,22 @@ func GetText(path string) <-chan string {
 // GetCSV returns a channel into which a goroutine writes maps of CSV lines from file at "path"
 // keyed by "heads" or if nil, by the heads in the first non-blank non-comment row.  CSV separator
 // is "sep" unless blank; in which case, the separator will be inferred.  CSV heads and values are
-// stripped of blanks and double-quotes.  If a prefix is specified in "comment", blank lines and
-// lines beginning with this prefix will be skipped.
+// stripped of blanks and double-quotes.  If a prefix is specified in "comment", lines beginning
+// with this prefix will be skipped.
 func GetCSV(path string, heads []string, sep string, comment string) <-chan map[string]string {
 	in := make(chan map[string]string, 256)
 	go func() {
 		defer close(in)
 		for ln := range GetText(path) {
+			tln := strings.TrimLeft(ln, " ")
 			for {
 				switch {
-				case comment != "" && (len(ln) == 0 || strings.HasPrefix(ln, comment)):
-				case sep == "" && len(ln) > 0:
+				case len(tln) == 0:
+				case comment != "" && strings.HasPrefix(tln, comment):
+				case sep == "":
 					max := 0
 					for _, s := range []string{",", "\t", "|", ";", ":"} {
-						if c := len(strings.Split(ln, s)); c == len(heads) {
+						if c := len(strings.Split(tln, s)); c == len(heads) {
 							sep = s
 							break
 						} else if c > max {
@@ -66,12 +68,12 @@ func GetCSV(path string, heads []string, sep string, comment string) <-chan map[
 						}
 					}
 					continue
-				case heads == nil && len(ln) > 0:
-					for _, v := range strings.Split(ln, sep) {
+				case len(heads) == 0:
+					for _, v := range strings.Split(tln, sep) {
 						heads = append(heads, strings.Trim(v, " \""))
 					}
 				default:
-					if s := strings.Split(ln, sep); len(s) == len(heads) {
+					if s := strings.Split(tln, sep); len(s) == len(heads) {
 						m := make(map[string]string, len(s))
 						for i, v := range s {
 							m[heads[i]] = strings.Trim(v, " \"")
