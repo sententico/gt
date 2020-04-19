@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+// PeekText returns up to "lines" lines of text from the file at "path" (or until EOF),
+// skipping comments and blank lines if the comment prefix "comment" is specified.
 func PeekText(path string, lines int, comment string) []string {
 	file, err := os.Open(path)
 	if err != nil {
@@ -24,6 +26,7 @@ func PeekText(path string, lines int, comment string) []string {
 	return peek
 }
 
+// GetText returns a channel into which a goroutine writes lines of text from file at "path".
 func GetText(path string) <-chan string {
 	in := make(chan string, 256)
 	go func() {
@@ -39,6 +42,11 @@ func GetText(path string) <-chan string {
 	return in
 }
 
+// GetCSV returns a channel into which a goroutine writes maps of CSV lines from file at "path"
+// keyed by "heads" or if nil, by the heads in the first non-blank non-comment row.  CSV separator
+// is "sep" unless blank; in which case, the separator will be inferred.  CSV heads and values are
+// stripped of blanks and double-quotes.  If a prefix is specified in "comment", blank lines and
+// lines beginning with this prefix will be skipped.
 func GetCSV(path string, heads []string, sep string, comment string) <-chan map[string]string {
 	in := make(chan map[string]string, 256)
 	go func() {
