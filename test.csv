@@ -1,10 +1,16 @@
-## animal file
 ##
-animal,count,value
+# CSV animal file
 
-dog,10,100
-cat,8,0
+animal|count|value
 
-## weird animals section
+dog|10|100
+cat|8|0
+
 ##
-wombat,5,20
+# weird animals section
+
+wombat|5|20
+wabbit|2|15
+weasel|10|40
+sloth|2|5
+anteater|5|12

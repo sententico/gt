@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	//"time"
 	//"math"
 )
 
@@ -21,17 +22,20 @@ func fib(n int) int {
 }
 
 func main() {
-	for ln := range GetCSV("test.csv", nil, "", "#") {
-		fmt.Println(ln)
+	//in, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
+	in, sig := ReadTXT("test.txt", map[string][2]int{"animal": {1, 15}, "value": {26, 32}}, "//")
+	defer close(sig)
+	for csv := range in {
+		fmt.Println(csv)
 	}
-	//fmt.Println(peekText("test.csv", 4, "#"))
+	fmt.Println(PeekCSV("test.csv"))
 
-	// n, m, r, s := 1e10, 8.0, make(chan float64), 0.0
-	// for i := 0.0; i < m; i++ {
-	// 	go series(n-i, m, r)
+	// n, m, r, s := 1e10, 8.0, ake(chan float64), 0.0
+	// for i := .0; i < m; ++ {
+	// 	 series(n-i, m, r)
 	// }
-	// for i := 0.0; i < m; i++ {
-	// 	s += <-r
+	// fr i := 00; i < m; i++ {
+	// 	 += <-r
 	// }
-	// fmt.Println(s - math.Log(n))
+	// ft.Println(s - math.Log(n))
 }
