@@ -22,8 +22,8 @@ func fib(n int) int {
 }
 
 func main() {
-	//in, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
-	in, sig := ReadTXT("test.txt", map[string][2]int{"animal": {1, 15}, "value": {26, 32}}, "//")
+	in, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
+	//in, sig := ReadTXT("test.txt", map[string][2]int{"animal": {1, 15}, "value": {26, 32}}, "//"
 	defer close(sig)
 	for csv := range in {
 		fmt.Println(csv)

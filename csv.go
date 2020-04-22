@@ -6,6 +6,31 @@ import (
 	"strings"
 )
 
+func handleSig(sig <-chan int, sigv *int) {
+	*sigv = 0
+	go func() {
+		for *sigv = range sig {
+		}
+		*sigv = -1
+	}()
+}
+
+func readLn(path string) (<-chan string, chan<- int) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil
+	}
+	out, sig, sigv := make(chan string, 64), make(chan int), 0
+	go func() {
+		defer file.Close()
+		defer close(out)
+		handleSig(sig, &sigv)
+		for ln := bufio.NewScanner(file); sigv == 0 && ln.Scan(); out <- ln.Text() {
+		}
+	}()
+	return out, sig
+}
+
 func splitCSV(ln string, sep rune) []string {
 	var fields []string
 	field, encl := "", false
@@ -24,52 +49,17 @@ func splitCSV(ln string, sep rune) []string {
 	return append(fields, field)
 }
 
-func handleSig(sig <-chan int, sigv *int) {
-	*sigv = 0
-	go func() {
-		for *sigv = range sig {
-		}
-		*sigv = -1
-	}()
-}
-
-// func sigClose(sig chan<- int, sigv *int) {
-// 	if *sigv == 0 {
-// 		close(sig)
-// 		*sigv = -1
-// 	} else if *sigv > 0 {
-// 		sig <- *sigv
-// 		*sigv = 0
-// 	}
-// }
-
-func readLn(path string) (<-chan string, chan<- int) {
-	out, sig, sigv := make(chan string, 64), make(chan int), 0
-	go func() {
-		defer close(out)
-		file, err := os.Open(path)
-		if err != nil {
-			return
-		}
-		defer file.Close()
-		handleSig(sig, &sigv)
-
-		for ln := bufio.NewScanner(file); sigv == 0 && ln.Scan(); out <- ln.Text() {
-		}
-	}()
-	return out, sig
-}
-
-// PeekCSV returns...(replaces PeekTXT)
+// PeekCSV returns a digest to identify the CSV (or TXT file) at "path". This digest consists of a
+// slice of the first few data lines (without blank or comment lines), the comment prefix used (if
+// any), and if a CSV, the field separator with fields of the first data line split by it.
 func PeekCSV(path string) ([]string, string, rune, []string) {
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, "", 0, nil
 	}
 	defer file.Close()
-	var peek []string
+	var peek, first []string
 	comment, lnc, sep, max := "", -1, '\x00', 1
-
 scan:
 	for bf := bufio.NewScanner(file); lnc < 4 && bf.Scan(); {
 		switch ln := bf.Text(); {
@@ -89,10 +79,6 @@ scan:
 			lnc++
 		}
 	}
-	if lnc <= 0 {
-		return peek, comment, sep, nil
-	}
-
 	for _, r := range ",\t|;:" {
 		p, c := 0, 0
 		for _, ln := range peek {
@@ -108,10 +94,16 @@ scan:
 	if sep == '\x00' {
 		return peek, comment, sep, nil
 	}
-	return peek, comment, sep, splitCSV(peek[0], sep)
+	for _, f := range splitCSV(peek[0], sep) {
+		first = append(first, strings.Trim(f, " "))
+	}
+	return peek, comment, sep, first
 }
 
-// ReadTXT returns a channel into which a goroutine writes lines of text from file at "path".
+// ReadTXT returns a channel into which a goroutine writes maps of fixed-field TXT lines from file
+// at "path" keyed by "heads" (another channel is returned for the caller to signal a halt).
+// Fields selected by byte ranges in the "heads" map are stripped of blanks; blank lines and those
+// prefixed by "comment" are skipped.
 func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[string]string, chan<- int) {
 	out, sig, sigv := make(chan map[string]string, 64), make(chan int), 0
 	go func() {
@@ -155,11 +147,11 @@ func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[s
 	return out, sig
 }
 
-// ReadCSV returns a channel into which a goroutine writes maps of CSV lines from file at "path"
-// keyed by "heads" or if nil, by the heads in the first non-blank non-comment row.  CSV separator
-// is "sep" unless 0x00; in which case, the separator will be inferred.  CSV heads and values are
-// stripped of blanks and double-quotes.  If a prefix is specified in "comment", lines beginning
-// with this prefix will be skipped.
+// ReadCSV returns a channel into which a goroutine writes field maps of CSV lines from file at
+// "path" keyed by "heads" map which may identify select columns for extraction, or if nil, by the
+// heads in the first data row (another channel is returned for the caller to signal a halt).  CSV
+// separator is "sep", or if \x00, will be inferred.  Fields are stripped of blanks and double-
+// quotes (which may enclose separators); blank lines and those prefixed by "comment" are skipped.
 func ReadCSV(path string, heads map[string]int, sep rune, comment string) (<-chan map[string]string, chan<- int) {
 	out, sig, sigv := make(chan map[string]string, 64), make(chan int), 0
 	go func() {
