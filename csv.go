@@ -149,29 +149,33 @@ func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[s
 		defer close(isig)
 		handleSig(sig, &sigv)
 
-		vl := 0
+		vw, line, algn := 0, 0, 0
 		for ln := range in {
-			for {
+			for line++; ; {
 				switch {
 				case len(strings.TrimLeft(ln, " ")) == 0:
 				case comment != "" && strings.HasPrefix(ln, comment):
-				case vl == 0:
-					vl = len(ln)
-					if len(heads) == 0 || len(heads) > vl {
+				case vw == 0:
+					vw = len(ln)
+					if len(heads) == 0 || len(heads) > vw {
 						panic(fmt.Errorf("missing or bad head map provided for TXT file %q", path))
 					}
 					for _, r := range heads {
-						if r[0] <= 0 || r[0] > r[1] || r[1] > vl {
+						if r[0] <= 0 || r[0] > r[1] || r[1] > vw {
 							panic(fmt.Errorf("bad range in head map provided for TXT file %q", path))
 						}
 					}
 					continue
-				case len(ln) != vl:
+				case len(ln) != vw:
+					if algn++; line > 200 && float64(algn)/float64(line) > 0.05 {
+						panic(fmt.Errorf("excessive column misalignment in TXT file %q (>%d rows)", path, algn))
+					}
 				default:
 					m := make(map[string]string, len(heads))
 					for h, r := range heads {
 						m[h] = strings.Trim(ln[r[0]-1:r[1]], " ")
 					}
+					m["~line"] = fmt.Sprintf("%d", line)
 					out <- m
 				}
 				break

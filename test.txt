@@ -7,3 +7,8 @@
 dog            20            100
 cat            15              0
 horse          500            50
+  
+// weird animal section
+//
+wombat         40           10
+weasel         3               8

@@ -5,8 +5,8 @@ import (
 )
 
 func main() {
-	in, err, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
-	//in, err, sig := ReadTXT("test.txt", map[string][]int{"animal": {1, 15}, "value": {26, 32}}, "//")
+	//in, err, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
+	in, err, sig := ReadTXT("test.txt", map[string][2]int{"animal": {1, 15}, "value": {26, 32}}, "//")
 	defer close(sig)
 	for csv := range in {
 		fmt.Println(csv)
