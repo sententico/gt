@@ -1,12 +1,23 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 )
 
-func main() {
-	//in, err, sig := ReadCSV("test.csv", map[string]int{"animal": 1, "value": 2}, '\x00', "#")
-	in, err, sig := ReadTXT("test.txt", map[string][2]int{"animal": {1, 15}, "value": {26, 32}}, "//")
+func printTXT(path string, cols map[string][2]int, comment string) {
+	in, err, sig := ReadTXT(path, cols, comment)
+	defer close(sig)
+	for txt := range in {
+		fmt.Println(txt)
+	}
+	if e := <-err; e != nil {
+		fmt.Println(e)
+	}
+}
+
+func printCSV(path string, sep rune, comment string) {
+	in, err, sig := ReadCSV(path, nil, sep, comment)
 	defer close(sig)
 	for csv := range in {
 		fmt.Println(csv)
@@ -14,10 +25,24 @@ func main() {
 	if e := <-err; e != nil {
 		fmt.Println(e)
 	}
+}
 
-	if dig, e := PeekCSV("test.csv"); e != nil {
+func peekPrint(path string) {
+	if dig, e := PeekCSV(path); e != nil {
 		fmt.Println(e)
+	} else if dig.sep > '\x00' {
+		printCSV(path, dig.sep, dig.comment)
 	} else {
-		fmt.Println(dig)
+		printTXT(path, map[string][2]int{"~raw": {1, len(dig.raw[0])}}, dig.comment)
 	}
+}
+
+func main() {
+	path := flag.String("p", "test.txt", fmt.Sprintf("specify `pathname`"))
+	flag.Usage = func() {
+		fmt.Printf("command usage: gt <flags>\n")
+		flag.PrintDefaults()
+	}
+	flag.Parse()
+	peekPrint(*path)
 }

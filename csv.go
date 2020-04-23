@@ -66,7 +66,7 @@ func splitCSV(ln string, sep rune) []string {
 			fields = append(fields, field)
 			field = ""
 		case r < '\x20' || r > '\x7e':
-			// alternatively replace non-printables: field += " "
+			// alternatively replace non-printables with a blank:field += " "
 		default:
 			field += string(r)
 		}
@@ -132,10 +132,10 @@ scan:
 }
 
 // ReadTXT returns a channel into which a goroutine writes maps of fixed-field TXT lines from file
-// at "path" keyed by "heads" (channels also provided for errors and for the caller to signal a
-// halt).  Fields selected by byte ranges in the "heads" map are stripped of blanks; blank lines
-// and those prefixed by "comment" are skipped.
-func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[string]string, <-chan error, chan<- int) {
+// at "path" keyed by "cols" (channels also provided for errors and for the caller to signal a
+// halt).  Fields selected by byte ranges in the "cols" map are stripped of blanks; empty fields
+// are suppressed; blank lines and those prefixd by "comment" are skipped.
+func ReadTXT(path string, cols map[string][2]int, comment string) (<-chan map[string]string, <-chan error, chan<- int) {
 	out, err, sig, sigv := make(chan map[string]string, 64), make(chan error, 1), make(chan int), 0
 	go func() {
 		defer close(out)
@@ -149,34 +149,38 @@ func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[s
 		defer close(isig)
 		handleSig(sig, &sigv)
 
-		vw, line, algn := 0, 0, 0
+		wid, line, algn := 0, 0, 0
 		for ln := range in {
 			for line++; ; {
 				switch {
 				case len(strings.TrimLeft(ln, " ")) == 0:
 				case comment != "" && strings.HasPrefix(ln, comment):
-				case vw == 0:
-					vw = len(ln)
-					if len(heads) == 0 || len(heads) > vw {
-						panic(fmt.Errorf("missing or bad head map provided for TXT file %q", path))
+				case wid == 0:
+					wid = len(ln)
+					if len(cols) == 0 || len(cols) > wid {
+						panic(fmt.Errorf("missing or bad column map provided for TXT file %q", path))
 					}
-					for _, r := range heads {
-						if r[0] <= 0 || r[0] > r[1] || r[1] > vw {
-							panic(fmt.Errorf("bad range in head map provided for TXT file %q", path))
+					for _, r := range cols {
+						if r[0] <= 0 || r[0] > r[1] || r[1] > wid {
+							panic(fmt.Errorf("bad range in column map provided for TXT file %q", path))
 						}
 					}
 					continue
-				case len(ln) != vw:
+				case len(ln) != wid:
 					if algn++; line > 200 && float64(algn)/float64(line) > 0.05 {
 						panic(fmt.Errorf("excessive column misalignment in TXT file %q (>%d rows)", path, algn))
 					}
 				default:
-					m := make(map[string]string, len(heads))
-					for h, r := range heads {
-						m[h] = strings.Trim(ln[r[0]-1:r[1]], " ")
+					m := make(map[string]string, len(cols))
+					for c, r := range cols {
+						if f := strings.Trim(ln[r[0]-1:r[1]], " "); len(f) > 0 {
+							m[c] = f
+						}
 					}
-					m["~line"] = fmt.Sprintf("%d", line)
-					out <- m
+					if len(m) > 0 {
+						m["~line"] = fmt.Sprintf("%d", line)
+						out <- m
+					}
 				}
 				break
 			}
@@ -192,12 +196,12 @@ func ReadTXT(path string, heads map[string][2]int, comment string) (<-chan map[s
 }
 
 // ReadCSV returns a channel into which a goroutine writes field maps of CSV lines from file at
-// "path" keyed by "heads" map which also identifies select columns for extraction, or if nil, by
-// the heads in the first data row (channels also provided for errors and for the caller to signal
-// a halt).  CSV separator is "sep", or if \x00, will be inferred.  Fields are stripped of blanks
-// and double-quotes (which may enclose separators); blank lines and those prefixed by "comment"
-// are skipped.
-func ReadCSV(path string, heads map[string]int, sep rune, comment string) (<-chan map[string]string, <-chan error, chan<- int) {
+// "path" keyedby "cols" map which also identifies select columns for extraction, or if nil, by
+// the heading in the first data row (channels also provided for errors and for the caller to
+// signal a halt).  CSV separator is "sep", or if \x00, will be inferred.  Fields are stripped o
+// blanks an double-quotes (which may enclose separators); empty fields are suppressed; blank
+// lines and thoseprefixed by "comment" are skipped.
+func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan map[string]string, <-chan error, chan<- int) {
 	out, err, sig, sigv := make(chan map[string]string, 64), make(chan error, 1), make(chan int), 0
 	go func() {
 		defer close(out)
@@ -211,7 +215,7 @@ func ReadCSV(path string, heads map[string]int, sep rune, comment string) (<-cha
 		defer close(isig)
 		handleSig(sig, &sigv)
 
-		vheads, vc, line, algn := make(map[string]int, 32), 0, 0, 0
+		vcols, wid, line, algn := make(map[string]int, 32), 0, 0, 0
 		for ln := range in {
 			for line++; ; {
 				switch {
@@ -225,19 +229,19 @@ func ReadCSV(path string, heads map[string]int, sep rune, comment string) (<-cha
 						}
 					}
 					continue
-				case len(vheads) == 0:
-					sln := splitCSV(ln, sep)
-					for i, h := range sln {
-						if h = strings.Trim(h, " "); h != "" && (len(heads) == 0 || heads[h] > 0) {
-							vheads[h] = i + 1
+				case len(vcols) == 0:
+					sl := splitCSV(ln, sep)
+					for i, c := range sl {
+						if c = strings.Trim(c, " "); c != "" && (len(cols) == 0 || cols[c] > 0) {
+							vcols[c] = i + 1
 						}
 					}
-					if vc = len(sln); len(heads) == 0 && len(vheads) < vc || len(vheads) < len(heads) {
-						if len(heads) == 0 || len(vheads) > 0 {
-							panic(fmt.Errorf("mismatched heads or missing header in CSV file %q", path))
+					if wid = len(sl); len(cols) == 0 && len(vcols) < wid || len(vcols) < len(cols) {
+						if len(cols) == 0 || len(cols) > 0 {
+							panic(fmt.Errorf("mismatched columns or no heading in CSV file %q", path))
 						}
 						cc, mc := make(map[int]int), 0
-						for _, i := range heads {
+						for _, i := range cols {
 							if i > 0 {
 								cc[i]++
 								if i > mc {
@@ -245,23 +249,23 @@ func ReadCSV(path string, heads map[string]int, sep rune, comment string) (<-cha
 								}
 							}
 						}
-						if mc > vc || len(cc) < len(heads) {
-							panic(fmt.Errorf("bad head map provided for CSV file %q", path))
+						if mc > wid || len(cc) < len(cols) {
+							panic(fmt.Errorf("bad column map provided for CSV file %q", path))
 						}
-						vheads = heads
+						vcols = cols
 						continue
 					}
 				default:
-					if sln := splitCSV(ln, sep); len(sln) == vc {
-						m, heading := make(map[string]string, len(vheads)), true
-						for h, i := range vheads {
-							f := strings.Trim(sln[i-1], " ")
-							if heading && f != h {
-								heading = false
+					if sl := splitCSV(ln, sep); len(sl) == wid {
+						m, heading := make(map[string]string, len(vcols)), true
+						for c, i := range vcols {
+							f := strings.Trim(sl[i-1], " ")
+							if len(f) > 0 {
+								m[c] = f
 							}
-							m[h] = f
+							heading = heading && f == c
 						}
-						if !heading {
+						if !heading && len(m) > 0 {
 							m["~line"] = fmt.Sprintf("%d", line)
 							out <- m
 						}
