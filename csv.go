@@ -18,6 +18,7 @@ type Digest struct {
 
 const previewRows = 6
 const sepSet = ",\t|;:"
+const maxFieldLen = 256
 
 var commentSet = [...]string{"#", "//", "'"}
 
@@ -98,7 +99,7 @@ func PeekCSV(path string) (dig Digest, err error) {
 		panic(fmt.Errorf("can't access %q metadata (%v)", path, e))
 	}
 	bf, row, tlen, max := bufio.NewScanner(file), -1, 0, 1
-scan:
+getLine:
 	for row < previewRows && bf.Scan() {
 		switch ln := bf.Text(); {
 		case len(strings.TrimLeft(ln, " ")) == 0:
@@ -108,7 +109,7 @@ scan:
 			for _, p := range commentSet {
 				if strings.HasPrefix(ln, p) {
 					dig.comment = p
-					continue scan
+					continue getLine
 				}
 			}
 			fallthrough
@@ -128,17 +129,21 @@ scan:
 	default:
 		dig.erows = int(float64(info.Size())/float64(tlen-len(dig.preview[0])+row-1)*0.99+0.5) * (row - 1)
 	}
+getSep:
 	for _, r := range sepSet {
-		p, c := 0, 0
+		c, sl := 0, []string{}
 		for _, ln := range dig.preview {
-			if c = len(splitCSV(ln, r)); c <= max || c != p && p > 0 {
-				break
+			if sl = splitCSV(ln, r); len(sl) <= max || len(sl) != c && c > 0 {
+				continue getSep
 			}
-			p = c
+			for _, f := range sl {
+				if len(f) > maxFieldLen {
+					continue getSep
+				}
+			}
+			c = len(sl)
 		}
-		if c == p {
-			max, dig.sep = c, r
-		}
+		max, dig.sep = c, r
 	}
 	if dig.sep > '\x00' {
 		for _, f := range splitCSV(dig.preview[0], dig.sep) {
@@ -246,30 +251,33 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 					}
 					continue
 				case len(vcols) == 0:
-					sl := splitCSV(ln, sep)
+					sl, uc, sc, mc := splitCSV(ln, sep), make(map[int]int, len(cols)), make(map[string]int, len(cols)), 0
+					for c, i := range cols {
+						if c = strings.Trim(c, " "); c != "" && i > 0 {
+							sc[c] = i
+							if uc[i]++; i > mc {
+								mc = i
+							}
+						}
+					}
 					for i, c := range sl {
-						// TODO: !cols[c]>0 ambiguous (c could be missing or index may be bad)
-						if c = strings.Trim(c, " "); c != "" && (len(cols) == 0 || cols[c] > 0) {
+						if c = strings.Trim(c, " "); c != "" && (len(sc) == 0 || sc[c] > 0) {
 							vcols[c] = i + 1
 						}
 					}
-					if wid = len(sl); len(cols) == 0 && len(vcols) < wid || len(vcols) < len(cols) {
-						if len(cols) == 0 || len(vcols) > 0 {
-							panic(fmt.Errorf("no heading or missing columns in CSV file %q", path))
-						}
-						cc, mc := make(map[int]int, len(cols)), 0
-						for _, i := range cols {
-							if i > 0 {
-								cc[i]++
-								if i > mc {
-									mc = i
-								}
-							}
-						}
-						if mc > wid || len(cc) < len(cols) {
-							panic(fmt.Errorf("bad column map provided for CSV file %q", path))
-						}
-						vcols = cols
+					switch wid = len(sl); {
+					case len(vcols) == wid:
+					case len(sc) == 0:
+						panic(fmt.Errorf("no heading in CSV file %q and no column map provided", path))
+					case len(vcols) == len(sc):
+					case len(vcols) > 0:
+						panic(fmt.Errorf("missing columns in CSV file %q", path))
+					case mc > wid:
+						panic(fmt.Errorf("column map incompatible with CSV file %q", path))
+					case len(uc) < len(sc):
+						panic(fmt.Errorf("ambiguous column map provided for CSV file %q", path))
+					default: // assume no heading; can't eliminate case where file is incompatible with sc
+						vcols = sc
 						continue
 					}
 				default:
