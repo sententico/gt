@@ -31,14 +31,16 @@ func peekPrint(path string) {
 	if dig, e := PeekCSV(path); e != nil {
 		fmt.Println(e)
 	} else if dig.sep > '\x00' {
+		fmt.Println(dig)
 		printCSV(path, dig.sep, dig.comment)
 	} else {
-		printTXT(path, map[string][2]int{"~raw": {1, len(dig.raw[0])}}, dig.comment)
+		fmt.Println(dig)
+		printTXT(path, map[string][2]int{"~raw": {1, len(dig.preview[0])}}, dig.comment)
 	}
 }
 
 func main() {
-	path := flag.String("p", "test.txt", fmt.Sprintf("specify `pathname`"))
+	path := flag.String("f", "test.csv", fmt.Sprintf("specify `pathname`"))
 	flag.Usage = func() {
 		fmt.Printf("command usage: gt <flags>\n")
 		flag.PrintDefaults()
