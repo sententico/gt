@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -12,13 +13,16 @@ type Digest struct {
 	preview []string // preview rows (excluding non-blank non-comment lines)
 	erows   int      // estimated total file rows
 	comment string   // inferred comment line prefix
-	sep     rune     // inferred field separator rune (if a CSV)
-	split   []string // trimmed fields of first preview row split by "sep" (if a CSV)
+	sep     rune     // inferred field separator rune (if CSV)
+	split   []string // trimmed fields of first preview row split by "sep" (if CSV)
+	heading bool     // first row probable heading (if CSV)
 }
 
-const previewRows = 6
-const sepSet = ",\t|;:"
-const maxFieldLen = 256
+const (
+	previewRows = 6        // number of preview rows returned by PeekCSV
+	sepSet      = ",\t|;:" // order of separator runes automatically checked if none specified
+	maxFieldLen = 256      // maximum field size allowed for PeekCSV to qualify a separator
+)
 
 var commentSet = [...]string{"#", "//", "'"}
 
@@ -66,7 +70,7 @@ func splitCSV(csv string, sep rune) (fields []string) {
 	for _, r := range csv {
 		switch {
 		case r > '\x7e' || r != '\x09' && r < '\x20':
-			// alternatively replace non-printables with a blank:field += " "
+			// alternatively replace non-printables with a blank: field += " "
 		case r == '"':
 			encl = !encl
 		case !encl && r == sep:
@@ -81,8 +85,8 @@ func splitCSV(csv string, sep rune) (fields []string) {
 
 // PeekCSV returns a digest to identify the CSV (or TXT file) at "path". This digest consists of a
 // preview slice of raw data rows (without blank or comment lines), a total file row estimate, the
-// comment prefix used (if any), and if a CSV, the field separator with trimmed fields of the first
-// data row split by it.
+// comment prefix used (if any), and if a CSV, the field separator, trimmed fields of the first
+// data row split by it, and a hint whether to treat this row as a heading.
 func PeekCSV(path string) (dig Digest, err error) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -127,7 +131,7 @@ getLine:
 	case row < previewRows:
 		dig.erows = row
 	default:
-		dig.erows = int(float64(info.Size())/float64(tlen-len(dig.preview[0])+row-1)*0.99+0.5) * (row - 1)
+		dig.erows = int(float64(info.Size())/float64(tlen-len(dig.preview[0])+row-1)*0.995+0.5) * (row - 1)
 	}
 getSep:
 	for _, r := range sepSet {
@@ -146,9 +150,15 @@ getSep:
 		max, dig.sep = c, r
 	}
 	if dig.sep > '\x00' {
+		uf := make(map[string]int, max)
 		for _, f := range splitCSV(dig.preview[0], dig.sep) {
-			dig.split = append(dig.split, strings.Trim(f, " "))
+			tf := strings.Trim(f, " ")
+			if _, e := strconv.ParseFloat(tf, 64); e != nil && len(tf) > 0 {
+				uf[tf]++
+			}
+			dig.split = append(dig.split, tf)
 		}
+		dig.heading = len(uf) == max
 	}
 	return
 }
@@ -182,14 +192,14 @@ func ReadTXT(path string, cols map[string][2]int, comment string) (<-chan map[st
 					if len(cols) == 0 || len(cols) > wid {
 						panic(fmt.Errorf("missing or bad column map provided for TXT file %q", path))
 					}
-					for _, r := range cols { // TODO: could look for range overlaps
+					for _, r := range cols { // TODO: potential range overlaps a feature?
 						if r[0] <= 0 || r[0] > r[1] || r[1] > wid {
 							panic(fmt.Errorf("bad range in column map provided for TXT file %q", path))
 						}
 					}
 					continue
 				case len(ln) != wid:
-					if algn++; line > 200 && float64(algn)/float64(line) > 0.05 {
+					if algn++; line > 200 && float64(algn)/float64(line) > 0.02 {
 						panic(fmt.Errorf("excessive column misalignment in TXT file %q (>%d rows)", path, algn))
 					}
 				default:
@@ -200,7 +210,7 @@ func ReadTXT(path string, cols map[string][2]int, comment string) (<-chan map[st
 						}
 					}
 					if len(m) > 0 {
-						m["~line"] = fmt.Sprintf("%d", line)
+						m["~line"] = fmt.Sprint(line)
 						out <- m
 					}
 				}
@@ -251,7 +261,7 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 					}
 					continue
 				case len(vcols) == 0:
-					sl, uc, sc, mc := splitCSV(ln, sep), make(map[int]int, len(cols)), make(map[string]int, len(cols)), 0
+					sl, uc, sc, mc, qc := splitCSV(ln, sep), make(map[int]int), make(map[string]int), 0, make(map[string]int)
 					for c, i := range cols {
 						if c = strings.Trim(c, " "); c != "" && i > 0 {
 							sc[c] = i
@@ -261,22 +271,27 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 						}
 					}
 					for i, c := range sl {
-						if c = strings.Trim(c, " "); c != "" && (len(sc) == 0 || sc[c] > 0) {
-							vcols[c] = i + 1
+						if c = strings.Trim(c, " "); c != "" {
+							if len(sc) == 0 || sc[c] > 0 {
+								vcols[c] = i + 1
+							}
+							if _, e := strconv.ParseFloat(c, 64); e != nil {
+								qc[c] = i + 1
+							}
 						}
 					}
 					switch wid = len(sl); {
-					case len(vcols) == wid:
+					case len(sc) == 0 && len(qc) == wid:
 					case len(sc) == 0:
 						panic(fmt.Errorf("no heading in CSV file %q and no column map provided", path))
 					case len(vcols) == len(sc):
 					case len(vcols) > 0:
 						panic(fmt.Errorf("missing columns in CSV file %q", path))
-					case mc > wid:
+					case len(qc) == wid || mc > wid:
 						panic(fmt.Errorf("column map incompatible with CSV file %q", path))
 					case len(uc) < len(sc):
 						panic(fmt.Errorf("ambiguous column map provided for CSV file %q", path))
-					default: // assume no heading; can't eliminate case where file is incompatible with sc
+					default:
 						vcols = sc
 						continue
 					}
@@ -291,10 +306,10 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 							heading = heading && f == c
 						}
 						if !heading && len(m) > 0 {
-							m["~line"] = fmt.Sprintf("%d", line)
+							m["~line"] = fmt.Sprint(line)
 							out <- m
 						}
-					} else if algn++; line > 200 && float64(algn)/float64(line) > 0.05 {
+					} else if algn++; line > 200 && float64(algn)/float64(line) > 0.02 {
 						panic(fmt.Errorf("excessive column misalignment in CSV file %q (>%d rows)", path, algn))
 					}
 				}
