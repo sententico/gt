@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"crypto/md5"
 )
 
 // Digest structure summarizing a CSV/TXT file for identification
@@ -16,6 +17,7 @@ type Digest struct {
 	sep     rune     // inferred field separator rune (if CSV)
 	split   []string // trimmed fields of first preview row split by "sep" (if CSV)
 	heading bool     // first row probable heading (if CSV)
+	md5		string	 // hash of heading (if CSV with heading)
 }
 
 const (
@@ -86,7 +88,7 @@ func splitCSV(csv string, sep rune) (fields []string) {
 // PeekCSV returns a digest to identify the CSV (or TXT file) at "path". This digest consists of a
 // preview slice of raw data rows (without blank or comment lines), a total file row estimate, the
 // comment prefix used (if any), and if a CSV, the field separator, trimmed fields of the first
-// data row split by it, and a hint whether to treat this row as a heading.
+// data row split by it, a hint whether to treat this row as a heading, and a hash if a heading.
 func PeekCSV(path string) (dig Digest, err error) {
 	defer func() {
 		if e := recover(); e != nil {
@@ -158,7 +160,9 @@ getSep:
 			}
 			dig.split = append(dig.split, tf)
 		}
-		dig.heading = len(uf) == max
+		if dig.heading = len(uf) == max; dig.heading {
+			dig.md5 = fmt.Sprintf("%x", md5.Sum([]byte(strings.Join(dig.split, string(dig.sep)))))
+		}
 	}
 	return
 }
@@ -210,7 +214,7 @@ func ReadTXT(path string, cols map[string][2]int, comment string) (<-chan map[st
 						}
 					}
 					if len(m) > 0 {
-						m["~line"] = fmt.Sprint(line)
+						m["~line"] = strconv.Itoa(line)
 						out <- m
 					}
 				}
@@ -306,7 +310,7 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 							heading = heading && f == c
 						}
 						if !heading && len(m) > 0 {
-							m["~line"] = fmt.Sprint(line)
+							m["~line"] = strconv.Itoa(line)
 							out <- m
 						}
 					} else if algn++; line > 200 && float64(algn)/float64(line) > 0.02 {
