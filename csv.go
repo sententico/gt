@@ -202,6 +202,7 @@ func ReadTXT(path string, cols map[string][2]int, comment string) (<-chan map[st
 						}
 					}
 					continue
+
 				case len(ln) != wid:
 					if algn++; line > 200 && float64(algn)/float64(line) > 0.02 {
 						panic(fmt.Errorf("excessive column misalignment in TXT file %q (>%d rows)", path, algn))
@@ -299,6 +300,7 @@ func ReadCSV(path string, cols map[string]int, sep rune, comment string) (<-chan
 						vcols = sc
 						continue
 					}
+
 				default:
 					if sl := splitCSV(ln, sep); len(sl) == wid {
 						m, heading := make(map[string]string, len(vcols)), true

@@ -15,10 +15,10 @@ var (
 	wg         sync.WaitGroup
 )
 
-func init() {
+func init() { // set up command-line flags
 	flag.BoolVar(&detailFlag, "d", false, fmt.Sprintf("specify detailed output"))
-	flag.StringVar(&csvMapFlag, "csv", "", fmt.Sprintf("specify CSV column map: \"<head>:<col>,...\""))
-	flag.StringVar(&txtMapFlag, "txt", "", fmt.Sprintf("specify TXT column map: \"<head>:<a>:<b>,...\""))
+	flag.StringVar(&csvMapFlag, "csv", "", fmt.Sprintf("specify CSV column `map`, like \"name:2,age:5\""))
+	flag.StringVar(&txtMapFlag, "txt", "", fmt.Sprintf("specify TXT column `map`, like \"name:10:35,age:40:42\""))
 
 	flag.Usage = func() {
 		fmt.Printf("command usage: gt <flags>\n")
@@ -26,26 +26,14 @@ func init() {
 	}
 }
 
-func peekRead(path string) {
-	defer func() {
-		if e := recover(); e != nil {
-			fmt.Printf("%v\n", e)
-		}
-	}()
-	dig, e := PeekCSV(path)
-	if e != nil {
+func peekOpen(path string) (<-chan map[string]string, <-chan error, chan<- int) {
+	switch dig, e := PeekCSV(path); {
+	case e != nil:
 		panic(fmt.Errorf("%v", e))
-	}
 
-	fmt.Println(dig)
-	var (
-		in  <-chan map[string]string
-		err <-chan error
-		sig chan<- int
-	)
-	switch dig.sep {
-	case '\x00':
-		in, err, sig = ReadTXT(path, func() (m map[string][2]int) {
+	case dig.sep == '\x00':
+		fmt.Println(dig) // parse TXT column map and return open reader channels
+		return ReadTXT(path, func() (m map[string][2]int) {
 			if txtMapFlag == "" {
 				return map[string][2]int{"~raw": {1, len(dig.preview[0])}}
 			}
@@ -73,8 +61,10 @@ func peekRead(path string) {
 			}
 			return
 		}(), dig.comment)
+
 	default:
-		in, err, sig = ReadCSV(path, func() (m map[string]int) {
+		fmt.Println(dig) // parse CSV column map and return open reader channels
+		return ReadCSV(path, func() (m map[string]int) {
 			if csvMapFlag != "" {
 				m = make(map[string]int, 32)
 				for i, t := range strings.Split(csvMapFlag, ",") {
@@ -91,27 +81,33 @@ func peekRead(path string) {
 			return
 		}(), dig.sep, dig.comment)
 	}
-	defer close(sig)
-
-	rows := 0
-	for row := range in {
-		if rows++; detailFlag {
-			fmt.Println(row)
-		}
-	}
-	if e := <-err; e != nil {
-		panic(fmt.Errorf("%v", e))
-	}
-	fmt.Printf("read %d rows from %q\n", rows, path)
 }
 
 func main() {
 	flag.Parse()
 	for _, file := range flag.Args() {
 		wg.Add(1)
+
 		go func(f string) {
-			defer wg.Done()
-			peekRead(f)
+			defer func() {
+				if e := recover(); e != nil {
+					fmt.Printf("%v\n", e)
+				}
+				defer wg.Done()
+			}()
+			in, err, sig := peekOpen(f)
+			defer close(sig)
+
+			rows := 0
+			for row := range in {
+				if rows++; detailFlag {
+					fmt.Println(row)
+				}
+			}
+			if e := <-err; e != nil {
+				panic(fmt.Errorf("%v", e))
+			}
+			fmt.Printf("read %d rows from %q\n", rows, f)
 		}(file)
 	}
 	wg.Wait()
